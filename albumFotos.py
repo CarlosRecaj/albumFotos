@@ -1,4 +1,5 @@
 import argparse
+import random
 import logging
 from pathlib import Path
 from datetime import datetime
@@ -12,19 +13,52 @@ from reportlab.lib.colors import HexColor
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 class AlbumGenerator:
-    def __init__(self, input_folder, output_file, title, show_date, show_time, photos_per_page=9):
+    def __init__(self, input_folder, output_file, title, show_date, show_time, layouts_str=None):
         self.input_folder = Path(input_folder)
         self.output_file = Path(output_file)
         self.title = title
         self.show_date = show_date
         self.show_time = show_time
-        self.photos_per_page = photos_per_page
+        
+        self.layouts = self._parse_layouts(layouts_str)
         
         # Paràmetres estètics
         self.page_size = A4
         self.margin = 25
         self.spacing = 15
         self.bg_color = HexColor("#F5F5F0")  # Fons crema/gris suau elegant
+
+    def _parse_layouts(self, layouts_str):
+        """
+        Interpreta una cadena de text com '2x2,2-3,1-2-1' en una llista de tuples.
+        Cada tuple representa una graella. Cada element del tuple és el nombre de fotos per fila.
+        Ex: (2, 3) -> Fila superior amb 2 fotos, fila inferior amb 3 fotos.
+        """
+        if not layouts_str:
+            # Si no hi ha preferència, barregem estils molt bonics i asimètrics per defecte.
+            # (1,) -> 1 foto molt gran
+            # (1, 2, 1) -> 1 a dalt, 2 al mig, 1 a baix
+            # (2, 3) -> 2 a dalt, 3 a baix (asimètric)
+            return [(1,), (2,), (2, 2), (2, 3), (3, 2), (1, 2, 1), (3, 3, 3)]
+        
+        res = []
+        for l in layouts_str.split(","):
+            l = l.strip()
+            if not l: continue
+            if 'x' in l.lower():
+                # '2x2' -> dues files de dues fotos: (2, 2)
+                r, c = map(int, l.lower().split('x'))
+                res.append(tuple([c] * r))
+            elif '-' in l:
+                # '2-3' -> fila 1 amb 2 fotos, fila 2 amb 3 fotos: (2, 3)
+                res.append(tuple(map(int, l.split('-'))))
+            else:
+                # Una sola fila: '3' -> (3,)
+                res.append((int(l),))
+        
+        if not res:
+            return [(2, 2), (3, 3, 3)]
+        return res
         
     def get_photo_datetime(self, path: Path) -> datetime:
         """Extreu la data de les metadades EXIF o bé de la modificació del fitxer."""
@@ -75,6 +109,36 @@ class AlbumGenerator:
         photo_infos = [(p, self.get_photo_datetime(p)) for p in photos]
         photo_infos.sort(key=lambda x: x[1])
 
+        # --- PRE-CÀLCUL DE PÀGINES I GRAELLES ---
+        remaining_photos = list(photo_infos)
+        pages = []
+        
+        while remaining_photos:
+            # Busquem layouts que tinguin capacitat igual o inferior a les fotos restants
+            valid_layouts = [l for l in self.layouts if sum(l) <= len(remaining_photos)]
+            
+            if not valid_layouts:
+                # Si queden menys fotos que la mida d'una graella, creem un disseny especial per les últimes.
+                left = len(remaining_photos)
+                if left == 1:
+                    layout = (1,)
+                elif left == 2:
+                    layout = (2,)
+                elif left == 3:
+                    layout = (1, 2)
+                elif left == 4:
+                    layout = (2, 2)
+                else:
+                    layout = (2, left - 2)
+            else:
+                layout = random.choice(valid_layouts)
+                
+            capacity = sum(layout)
+            page_photos = remaining_photos[:capacity]
+            remaining_photos = remaining_photos[capacity:]
+            pages.append((layout, page_photos))
+
+        # --- INICI DEL PDF ---
         c = canvas.Canvas(str(self.output_file), pagesize=self.page_size)
         page_w, page_h = self.page_size
         
@@ -84,7 +148,6 @@ class AlbumGenerator:
         c.setFont("Helvetica-Bold", 36)
         c.drawCentredString(page_w / 2, page_h / 2 + 30, self.title)
         
-        # Subtítol amb el rang de dates
         first_date = photo_infos[0][1].strftime("%d/%m/%Y")
         last_date = photo_infos[-1][1].strftime("%d/%m/%Y")
         c.setFont("Helvetica-Oblique", 18)
@@ -95,118 +158,113 @@ class AlbumGenerator:
         else:
             c.drawCentredString(page_w / 2, page_h / 2 - 10, f"De {first_date} a {last_date}")
             
-        c.showPage() # Salta a la següent pàgina
+        c.showPage() 
         
         # --- PÀGINES DE FOTOS ---
-        cols = int(self.photos_per_page ** 0.5 + 0.5)
-        rows = (self.photos_per_page + cols - 1) // cols
-
-        usable_w = page_w - 2 * self.margin - (cols - 1) * self.spacing
-        usable_h = page_h - 2 * self.margin - (rows - 1) * self.spacing
-
-        cell_w = usable_w / cols
-        cell_h = usable_h / rows
-        
-        # Reserva d'espai per al text i marcs
         text_height = 0
         if self.show_date or self.show_time:
-            text_height = 20 # Espai per la data/hora a la base
+            text_height = 20
             
         polaroid_padding = 8
         shadow_offset = 3
 
         page_num = 1
+        usable_w = page_w - 2 * self.margin
+        usable_h = page_h - 2 * self.margin
         
-        for i, (photo_path, dt) in enumerate(photo_infos):
-            # Si és la primera foto d'una pàgina nova, pintem el fons i el peu
-            if i % self.photos_per_page == 0:
-                self.draw_background(c, page_w, page_h)
-                self.draw_footer(c, page_num, page_w)
-                page_num += 1
+        for layout, page_photos in pages:
+            self.draw_background(c, page_w, page_h)
+            self.draw_footer(c, page_num, page_w)
+            
+            rows = len(layout)
+            # L'alçada de cada fila és uniforme per tota la pàgina
+            cell_h = (usable_h - (rows - 1) * self.spacing) / rows
+            
+            photo_index = 0
+            
+            # Recorrem les files de la graella asimètrica
+            for row_idx, cols_in_row in enumerate(layout):
+                # L'amplada de les cel·les varia en funció de quantes fotos hi ha a la fila actual
+                cell_w = (usable_w - (cols_in_row - 1) * self.spacing) / cols_in_row
                 
-            pos = i % self.photos_per_page
-            col = pos % cols
-            row = pos // cols
-
-            # Coordenades x, y inferior esquerra de la cel·la
-            x = self.margin + col * (cell_w + self.spacing)
-            y = page_h - self.margin - (row + 1) * cell_h - row * self.spacing
-
-            try:
-                with Image.open(photo_path) as im:
-                    im = ImageOps.exif_transpose(im)
-                    img_reader = ImageReader(im)
-                    iw, ih = im.size
-                    aspect = iw / ih
-
-                    # Mida disponible per a la imatge neta (descomptant vores del polaroid i el text)
-                    target_w = cell_w - (polaroid_padding * 2)
-                    target_h = cell_h - (polaroid_padding * 2) - text_height
-
-                    if target_w / target_h > aspect:
-                        draw_h = target_h
-                        draw_w = target_h * aspect
-                    else:
-                        draw_w = target_w
-                        draw_h = target_w / aspect
-                    
-                    # Dimensions totals del marc blanc "Polaroid"
-                    frame_w = draw_w + (polaroid_padding * 2)
-                    frame_h = draw_h + (polaroid_padding * 2) + text_height
-                    
-                    # Centrem el marc dins la cel·la
-                    frame_x = x + (cell_w - frame_w) / 2
-                    frame_y = y + (cell_h - frame_h) / 2
-                    
-                    # 1. Dibuixar l'ombra
-                    c.setFillColor(HexColor("#D0D0D0")) # Gris ombra
-                    c.rect(frame_x + shadow_offset, frame_y - shadow_offset, frame_w, frame_h, stroke=0, fill=1)
-                    
-                    # 2. Dibuixar el marc blanc (Polaroid)
-                    c.setFillColor(HexColor("#FFFFFF"))
-                    c.rect(frame_x, frame_y, frame_w, frame_h, stroke=0, fill=1)
-                    
-                    # 3. Dibuixar la imatge a l'interior
-                    img_x = frame_x + polaroid_padding
-                    img_y = frame_y + polaroid_padding + text_height
-                    c.drawImage(img_reader, img_x, img_y, width=draw_w, height=draw_h, preserveAspectRatio=True, mask='auto')
-
-                # 4. Text inferior (Data i Hora opcionals)
-                if self.show_date or self.show_time:
-                    parts = []
-                    if self.show_date:
-                        parts.append(dt.strftime("%d/%m/%Y"))
-                    if self.show_time:
-                        parts.append(dt.strftime("%H:%M"))
+                for col_idx in range(cols_in_row):
+                    if photo_index >= len(page_photos):
+                        break
                         
-                    date_text = " - ".join(parts)
-                    c.setFont("Helvetica-Oblique", 9)
-                    c.setFillColor(HexColor("#666666"))
+                    photo_path, dt = page_photos[photo_index]
                     
-                    text_x = frame_x + frame_w / 2
-                    # L'altura y per al text es centra en l'espai reservat sota la imatge
-                    text_y = frame_y + (polaroid_padding + text_height) / 2 - 3
+                    x = self.margin + col_idx * (cell_w + self.spacing)
+                    y = page_h - self.margin - (row_idx + 1) * cell_h - row_idx * self.spacing
+
+                    try:
+                        with Image.open(photo_path) as im:
+                            im = ImageOps.exif_transpose(im)
+                            img_reader = ImageReader(im)
+                            iw, ih = im.size
+                            aspect = iw / ih
+
+                            target_w = cell_w - (polaroid_padding * 2)
+                            target_h = cell_h - (polaroid_padding * 2) - text_height
+
+                            if target_w / target_h > aspect:
+                                draw_h = target_h
+                                draw_w = target_h * aspect
+                            else:
+                                draw_w = target_w
+                                draw_h = target_w / aspect
+                            
+                            frame_w = draw_w + (polaroid_padding * 2)
+                            frame_h = draw_h + (polaroid_padding * 2) + text_height
+                            
+                            frame_x = x + (cell_w - frame_w) / 2
+                            frame_y = y + (cell_h - frame_h) / 2
+                            
+                            c.setFillColor(HexColor("#D0D0D0"))
+                            c.rect(frame_x + shadow_offset, frame_y - shadow_offset, frame_w, frame_h, stroke=0, fill=1)
+                            
+                            c.setFillColor(HexColor("#FFFFFF"))
+                            c.rect(frame_x, frame_y, frame_w, frame_h, stroke=0, fill=1)
+                            
+                            img_x = frame_x + polaroid_padding
+                            img_y = frame_y + polaroid_padding + text_height
+                            c.drawImage(img_reader, img_x, img_y, width=draw_w, height=draw_h, preserveAspectRatio=True, mask='auto')
+
+                        if self.show_date or self.show_time:
+                            parts = []
+                            if self.show_date:
+                                parts.append(dt.strftime("%d/%m/%Y"))
+                            if self.show_time:
+                                parts.append(dt.strftime("%H:%M"))
+                                
+                            date_text = " - ".join(parts)
+                            c.setFont("Helvetica-Oblique", 9)
+                            c.setFillColor(HexColor("#666666"))
+                            
+                            text_x = frame_x + frame_w / 2
+                            text_y = frame_y + (polaroid_padding + text_height) / 2 - 3
+                            
+                            c.drawCentredString(text_x, text_y, date_text)
+
+                    except Exception as e:
+                        logging.error(f"Error processant {photo_path.name}: {e}")
+
+                    photo_index += 1
                     
-                    c.drawCentredString(text_x, text_y, date_text)
-
-            except Exception as e:
-                logging.error(f"Error processant {photo_path.name}: {e}")
-
-            # Salt de pàgina si la graella està plena i encara queden fotos
-            if (i + 1) % self.photos_per_page == 0 and i < len(photo_infos) - 1:
-                c.showPage()
+            c.showPage()
+            page_num += 1
                 
         c.save()
-        logging.info(f"Tasca finalitzada. PDF generat correctament: {self.output_file.absolute()}")
+        logging.info(f"Tasca finalitzada. PDF generat correctament amb graelles dinàmiques: {self.output_file.absolute()}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generador d'Àlbums de Fotos PDF amb Estil")
-    parser.add_argument("-i", "--input", type=str, default="Fotos Destacades", help="Carpeta origen de les fotos")
-    parser.add_argument("-o", "--output", type=str, default="album_def2.pdf", help="Nom del fitxer PDF resultant")
+    parser = argparse.ArgumentParser(description="Generador d'Àlbums de Fotos PDF amb Graelles Asimètriques i Dinàmiques")
+    parser.add_argument("-i", "--input", type=str, default="Fotos", help="Carpeta origen de les fotos")
+    parser.add_argument("-o", "--output", type=str, default="album_def.pdf", help="Nom del fitxer PDF resultant")
     parser.add_argument("-t", "--title", type=str, default="El meu Àlbum de Fotos", help="Títol de la portada")
     parser.add_argument("--show-date", action="store_true", help="Mostra la data sota cada foto (estil: 14/05/2023)")
     parser.add_argument("--show-time", action="store_true", help="Mostra l'hora sota cada foto (estil: 15:30)")
+    parser.add_argument("--layouts", type=str, default="", help="Estils de graella permesos. Ex: '2x2,2-3,1-2-1'. Deixa-ho buit per ús automàtic.")
     
     args = parser.parse_args()
 
@@ -217,7 +275,8 @@ def main():
         output_file=args.output,
         title=args.title,
         show_date=args.show_date,
-        show_time=args.show_time
+        show_time=args.show_time,
+        layouts_str=args.layouts
     )
     
     generator.generate()
