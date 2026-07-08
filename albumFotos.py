@@ -1,191 +1,226 @@
+import argparse
 import logging
-import re
 from pathlib import Path
 from datetime import datetime
 from PIL import Image, ExifTags, ImageOps
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
+from reportlab.lib.colors import HexColor
 
-# --- AJUSTOS DE L'USUARI ---
-# Variables generals per fer-ho més fàcil de configurar.
-INPUT_FOLDER = Path("Fotos Destacades")       # Carpeta origen de les fotos
-OUTPUT_FILE = Path("album_def2.pdf")          # Nom del fitxer PDF resultant
-PHOTOS_PER_PAGE = 9                           # Distribució en graella de 3x3 (9 fotos per pàgina)
-MARGIN = 20                                   # Marges de seguretat per evitar talls en la impressió
-SPACING = 5                                   # Espai de separació estètica entre fotografies
-TEXT_HEIGHT = 20                              # Espai vertical reservat per col·locar la data sota cada foto
-PAGE_SIZE = A4
-
-# Configuració del logging per disposar de nivells de severitat (INFO, ERROR)
-# en comptes d'utilitzar print(), preparant l'script per a possibles execucions en servidors.
+# Configuració del logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-def get_photo_datetime(path: Path) -> datetime:
-    """
-    Extracció de la data original de les metadades EXIF de la foto.
-    Aquest mètode garanteix un ordre cronològic estricte de forma fiable.
-    Si la foto no conté EXIF (ex. imatges de WhatsApp), s'utilitza la data de modificació del fitxer com a alternativa.
-    """
-    try:
-        # L'ús del context manager (with) assegura que el fitxer es tanqui correctament en tots els casos.
-        # Image.open aplica "lazy loading", carregant només les capçaleres en lloc de tota la memòria de píxels.
-        with Image.open(path) as img:
-            # S'utilitza _getexif() perquè retorna un diccionari pla amb totes les etiquetes (incloses les del subdirectori Exif),
-            # on normalment es troben "DateTimeOriginal" i "DateTimeDigitized". El mètode getexif() sovint les omet a Pillow.
-            exif = None
-            if hasattr(img, '_getexif'):
-                exif = img._getexif()
-                
-            if exif:
-                # S'iteren les etiquetes per buscar la data, utilitzant ExifTags.TAGS per traduir els IDs numèrics.
-                for tag, value in exif.items():
-                    tag_name = ExifTags.TAGS.get(tag, tag)
-                    if tag_name in ("DateTimeOriginal", "DateTimeDigitized", "DateTime"):
-                        try:
-                            # Es converteix la cadena EXIF a un objecte datetime natiu de Python.
-                            return datetime.strptime(str(value), "%Y:%m:%d %H:%M:%S")
-                        except ValueError:
-                            # Si el format de la data és invàlid, s'ignora i es continua la cerca.
-                            continue 
-    except Exception as e:
-        # Si hi ha un error no s'atura l'execució si l'imatge està corrompuda, però es deixa rastre al debug per investigar-ho.
-        logging.debug(f"Avís: No s'han pogut llegir les metadades EXIF de {path.name} ({e})")
-
-    # Intent d'extracció de la data a partir del nom del fitxer per a imatges sense EXIF (ex. WhatsApp "IMG-20231015-WA0001.jpg").
-    # S'utilitza una expressió regular per identificar el patró de data integrat.
-    match = re.search(r"(?:IMG|VID)-(\d{4})(\d{2})(\d{2})-WA", path.name, re.IGNORECASE)
-    if match:
+class AlbumGenerator:
+    def __init__(self, input_folder, output_file, title, show_date, show_time, photos_per_page=9):
+        self.input_folder = Path(input_folder)
+        self.output_file = Path(output_file)
+        self.title = title
+        self.show_date = show_date
+        self.show_time = show_time
+        self.photos_per_page = photos_per_page
+        
+        # Paràmetres estètics
+        self.page_size = A4
+        self.margin = 25
+        self.spacing = 15
+        self.bg_color = HexColor("#F5F5F0")  # Fons crema/gris suau elegant
+        
+    def get_photo_datetime(self, path: Path) -> datetime:
+        """Extreu la data de les metadades EXIF o bé de la modificació del fitxer."""
         try:
-            year, month, day = map(int, match.groups())
-            # En absència d'hora al nom del fitxer, s'assigna per defecte les 00:00:00.
-            return datetime(year, month, day)
-        except ValueError:
-            pass
-
-    # Alternativa (Pla C): s'utilitza la data més antiga entre st_mtime i st_ctime del sistema de fitxers.
-    # En casos on el nom és un hash (ex: e09f33830-...) i no hi ha EXIF, aquesta és l'única informació que queda.
-    # A Windows, st_ctime és la creació i st_mtime la modificació. N'agafem la més antiga.
-    stat = path.stat()
-    return datetime.fromtimestamp(min(stat.st_mtime, stat.st_ctime))
-
-def make_pdf(photo_infos: list[tuple[Path, datetime]]):
-    """
-    Generació de la graella de fotos al document PDF. 
-    Es calculen les dimensions dinàmicament per evitar la deformació de les imatges
-    i es gestionen automàticament els salts de pàgina.
-    """
-    # Càlcul de columnes i files de forma automàtica mitjançant l'arrel quadrada del total. 
-    # Per a 9 fotos s'obté una graella de 3x3; per a 8 fotos, es calcula la millor distribució deixant forats buits.
-    cols = int(PHOTOS_PER_PAGE ** 0.5 + 0.5)
-    rows = (PHOTOS_PER_PAGE + cols - 1) // cols
-
-    page_w, page_h = PAGE_SIZE
-    
-    # Càlcul de l'espai útil per pintar, restant els marges exteriors i l'espai de separació entre les fotos.
-    usable_w = page_w - 2 * MARGIN - (cols - 1) * SPACING
-    usable_h = page_h - 2 * MARGIN - (rows - 1) * SPACING
-
-    # Divisió de l'espai útil entre el nombre de columnes/files per obtenir les dimensions màximes de cada cel·la.
-    cell_w = usable_w / cols
-    cell_h = usable_h / rows
-
-    # Inicialització del llenç del document PDF mitjançant ReportLab.
-    c = canvas.Canvas(str(OUTPUT_FILE), pagesize=PAGE_SIZE)
-
-    for i, (photo_path, dt) in enumerate(photo_infos):
-        # Creació d'una nova pàgina en arribar al límit d'imatges establert per pàgina.
-        if i % PHOTOS_PER_PAGE == 0 and i > 0:
-            c.showPage()
-
-        # Càlcul de la posició (columna i fila) corresponent a la foto actual dins la graella.
-        pos = i % PHOTOS_PER_PAGE
-        col = pos % cols
-        row = pos // cols
-
-        # ReportLab situa l'origen de coordenades (0,0) a la cantonada inferior esquerra.
-        # Es calcula la posició X (esquerra a dreta) i la posició Y (dalt a baix), aplicant marges i separacions.
-        x = MARGIN + col * (cell_w + SPACING)
-        y = page_h - MARGIN - (row + 1) * cell_h - row * SPACING
-
-        try:
-            with Image.open(photo_path) as im:
-                # Les fotografies fetes amb dispositius mòbils solen estar rotades només a les metadades (EXIF). 
-                # S'aplica exif_transpose per rotar els píxels físicament, evitant que es mostrin de costat al PDF.
-                im = ImageOps.exif_transpose(im)
-                
-                # Conversió de la imatge de PIL a un ImageReader de ReportLab abans del procés de dibuix.
-                # Aquesta decisió prevé pèrdues de memòria o càrregues dobles innecessàries al Canvas.
-                img_reader = ImageReader(im)
-                
-                iw, ih = im.size
-                aspect = iw / ih
-
-                # Dedicació de l'espai necessari per a la imatge, considerant l'espai reservat a la base per al text.
-                target_w = cell_w
-                target_h = cell_h - TEXT_HEIGHT
-
-                # Redimensió de la imatge perquè s'ajusti a la cel·la mantenint la relació d'aspecte original (aspect ratio).
-                # Es determina si la limitació d'escala ve donada per l'amplada o bé per l'alçada.
-                if target_w / target_h > aspect:
-                    draw_h = target_h
-                    draw_w = target_h * aspect
-                else:
-                    draw_w = target_w
-                    draw_h = target_w / aspect
-
-                # Atès que la foto generalment no ocupa tota la cel·la (per conservar la proporció),
-                # se centra horitzontalment sumant la meitat de l'espai restant.
-                img_x = x + (cell_w - draw_w) / 2
-                img_y = y + TEXT_HEIGHT 
-
-                # Inserció de la fotografia final al document, aplicant les restriccions per evitar deformacions.
-                c.drawImage(img_reader, img_x, img_y,
-                            width=draw_w, height=draw_h,
-                            preserveAspectRatio=True, mask='auto')
-
-            # Formatació de la data i inserció del text centrat a la part inferior de la imatge.
-            date_text = dt.strftime("%Y-%m-%d %H:%M")
-            c.setFont("Helvetica", 8)
-            text_x = x + cell_w / 2
-            text_y = img_y - 10 
-            c.drawCentredString(text_x, text_y, date_text)
-
+            with Image.open(path) as img:
+                exif = img.getexif() 
+                if not exif and hasattr(img, '_getexif'):
+                    exif = getattr(img, "_getexif", lambda: None)()
+                    
+                if exif:
+                    for tag, value in exif.items():
+                        tag_name = ExifTags.TAGS.get(tag, tag)
+                        if tag_name in ("DateTimeOriginal", "DateTimeDigitized", "DateTime"):
+                            try:
+                                return datetime.strptime(str(value), "%Y:%m:%d %H:%M:%S")
+                            except ValueError:
+                                continue 
         except Exception as e:
-            # En cas de fallada en una imatge específica, es registra l'error sense interrompre la generació de la resta del document.
-            logging.error(f"Error processant {photo_path.name}: {e}")
+            logging.debug(f"Avís: No s'han pogut llegir les metadades EXIF de {path.name} ({e})")
 
-    c.save()
-    logging.info(f"PDF generat correctament: {OUTPUT_FILE.absolute()}")
+        # Pla B: st_mtime
+        return datetime.fromtimestamp(path.stat().st_mtime)
+
+    def draw_background(self, c, w, h):
+        """Dibuixa el color de fons sòlid per a tota la pàgina."""
+        c.setFillColor(self.bg_color)
+        c.rect(0, 0, w, h, stroke=0, fill=1)
+
+    def draw_footer(self, c, page_num, w):
+        """Afegeix la numeració de pàgina al peu."""
+        c.setFont("Helvetica", 10)
+        c.setFillColor(HexColor("#888888"))
+        c.drawCentredString(w / 2, 15, f"Pàgina {page_num}")
+
+    def generate(self):
+        if not self.input_folder.is_dir():
+            logging.error(f"No s'ha trobat el directori d'origen: {self.input_folder}")
+            return
+
+        valid_extensions = {".jpg", ".jpeg", ".png"}
+        photos = [p for p in self.input_folder.iterdir() if p.is_file() and p.suffix.lower() in valid_extensions]
+
+        if not photos:
+            logging.warning("No s'han trobat imatges vàlides a la carpeta.")
+            return
+
+        # Ordenar les fotos per data de més antigues a més recents
+        photo_infos = [(p, self.get_photo_datetime(p)) for p in photos]
+        photo_infos.sort(key=lambda x: x[1])
+
+        c = canvas.Canvas(str(self.output_file), pagesize=self.page_size)
+        page_w, page_h = self.page_size
+        
+        # --- PORTADA ---
+        self.draw_background(c, page_w, page_h)
+        c.setFillColor(HexColor("#333333"))
+        c.setFont("Helvetica-Bold", 36)
+        c.drawCentredString(page_w / 2, page_h / 2 + 30, self.title)
+        
+        # Subtítol amb el rang de dates
+        first_date = photo_infos[0][1].strftime("%d/%m/%Y")
+        last_date = photo_infos[-1][1].strftime("%d/%m/%Y")
+        c.setFont("Helvetica-Oblique", 18)
+        c.setFillColor(HexColor("#666666"))
+        
+        if first_date == last_date:
+            c.drawCentredString(page_w / 2, page_h / 2 - 10, f"{first_date}")
+        else:
+            c.drawCentredString(page_w / 2, page_h / 2 - 10, f"De {first_date} a {last_date}")
+            
+        c.showPage() # Salta a la següent pàgina
+        
+        # --- PÀGINES DE FOTOS ---
+        cols = int(self.photos_per_page ** 0.5 + 0.5)
+        rows = (self.photos_per_page + cols - 1) // cols
+
+        usable_w = page_w - 2 * self.margin - (cols - 1) * self.spacing
+        usable_h = page_h - 2 * self.margin - (rows - 1) * self.spacing
+
+        cell_w = usable_w / cols
+        cell_h = usable_h / rows
+        
+        # Reserva d'espai per al text i marcs
+        text_height = 0
+        if self.show_date or self.show_time:
+            text_height = 20 # Espai per la data/hora a la base
+            
+        polaroid_padding = 8
+        shadow_offset = 3
+
+        page_num = 1
+        
+        for i, (photo_path, dt) in enumerate(photo_infos):
+            # Si és la primera foto d'una pàgina nova, pintem el fons i el peu
+            if i % self.photos_per_page == 0:
+                self.draw_background(c, page_w, page_h)
+                self.draw_footer(c, page_num, page_w)
+                page_num += 1
+                
+            pos = i % self.photos_per_page
+            col = pos % cols
+            row = pos // cols
+
+            # Coordenades x, y inferior esquerra de la cel·la
+            x = self.margin + col * (cell_w + self.spacing)
+            y = page_h - self.margin - (row + 1) * cell_h - row * self.spacing
+
+            try:
+                with Image.open(photo_path) as im:
+                    im = ImageOps.exif_transpose(im)
+                    img_reader = ImageReader(im)
+                    iw, ih = im.size
+                    aspect = iw / ih
+
+                    # Mida disponible per a la imatge neta (descomptant vores del polaroid i el text)
+                    target_w = cell_w - (polaroid_padding * 2)
+                    target_h = cell_h - (polaroid_padding * 2) - text_height
+
+                    if target_w / target_h > aspect:
+                        draw_h = target_h
+                        draw_w = target_h * aspect
+                    else:
+                        draw_w = target_w
+                        draw_h = target_w / aspect
+                    
+                    # Dimensions totals del marc blanc "Polaroid"
+                    frame_w = draw_w + (polaroid_padding * 2)
+                    frame_h = draw_h + (polaroid_padding * 2) + text_height
+                    
+                    # Centrem el marc dins la cel·la
+                    frame_x = x + (cell_w - frame_w) / 2
+                    frame_y = y + (cell_h - frame_h) / 2
+                    
+                    # 1. Dibuixar l'ombra
+                    c.setFillColor(HexColor("#D0D0D0")) # Gris ombra
+                    c.rect(frame_x + shadow_offset, frame_y - shadow_offset, frame_w, frame_h, stroke=0, fill=1)
+                    
+                    # 2. Dibuixar el marc blanc (Polaroid)
+                    c.setFillColor(HexColor("#FFFFFF"))
+                    c.rect(frame_x, frame_y, frame_w, frame_h, stroke=0, fill=1)
+                    
+                    # 3. Dibuixar la imatge a l'interior
+                    img_x = frame_x + polaroid_padding
+                    img_y = frame_y + polaroid_padding + text_height
+                    c.drawImage(img_reader, img_x, img_y, width=draw_w, height=draw_h, preserveAspectRatio=True, mask='auto')
+
+                # 4. Text inferior (Data i Hora opcionals)
+                if self.show_date or self.show_time:
+                    parts = []
+                    if self.show_date:
+                        parts.append(dt.strftime("%d/%m/%Y"))
+                    if self.show_time:
+                        parts.append(dt.strftime("%H:%M"))
+                        
+                    date_text = " - ".join(parts)
+                    c.setFont("Helvetica-Oblique", 9)
+                    c.setFillColor(HexColor("#666666"))
+                    
+                    text_x = frame_x + frame_w / 2
+                    # L'altura y per al text es centra en l'espai reservat sota la imatge
+                    text_y = frame_y + (polaroid_padding + text_height) / 2 - 3
+                    
+                    c.drawCentredString(text_x, text_y, date_text)
+
+            except Exception as e:
+                logging.error(f"Error processant {photo_path.name}: {e}")
+
+            # Salt de pàgina si la graella està plena i encara queden fotos
+            if (i + 1) % self.photos_per_page == 0 and i < len(photo_infos) - 1:
+                c.showPage()
+                
+        c.save()
+        logging.info(f"Tasca finalitzada. PDF generat correctament: {self.output_file.absolute()}")
+
 
 def main():
-    # Comprovació inicial de l'existència de la carpeta de les fotos per evitar execucions innecessàries.
-    if not INPUT_FOLDER.is_dir():
-        logging.error(f"No s'ha trobat el directori {INPUT_FOLDER}")
-        return
-
-    logging.info("Analitzant el directori de fotos...")
+    parser = argparse.ArgumentParser(description="Generador d'Àlbums de Fotos PDF amb Estil")
+    parser.add_argument("-i", "--input", type=str, default="Fotos Destacades", help="Carpeta origen de les fotos")
+    parser.add_argument("-o", "--output", type=str, default="album_def2.pdf", help="Nom del fitxer PDF resultant")
+    parser.add_argument("-t", "--title", type=str, default="El meu Àlbum de Fotos", help="Títol de la portada")
+    parser.add_argument("--show-date", action="store_true", help="Mostra la data sota cada foto (estil: 14/05/2023)")
+    parser.add_argument("--show-time", action="store_true", help="Mostra l'hora sota cada foto (estil: 15:30)")
     
-    # Definició d'extensions vàlides en format Set (conjunt). 
-    # A Python, la cerca en un Set té una complexitat O(1) (instantània), millorant el rendiment en llistes llargues de fitxers.
-    valid_extensions = {".jpg", ".jpeg", ".png"}
+    args = parser.parse_args()
+
+    logging.info(f"Iniciant la generació de l'àlbum '{args.title}' des de '{args.input}'")
     
-    # Ús de llistes per comprensió i pathlib.iterdir(), una operació més eficient que os.listdir(), 
-    # ja que itera i filtra directament a nivell de sistema operatiu.
-    photos = [p for p in INPUT_FOLDER.iterdir() if p.is_file() and p.suffix.lower() in valid_extensions]
-
-    if not photos:
-        logging.warning("No s'han trobat imatges vàlides a la carpeta.")
-        return
-
-    # Mapeig dels fitxers amb la seva data EXIF corresponent, seguit d'una ordenació cronològica.
-    # Aquest pas garanteix que les imatges de l'àlbum es mostrin ordenades de forma ascendent.
-    photo_infos = [(p, get_photo_datetime(p)) for p in photos]
-    photo_infos.sort(key=lambda x: x[1])
-
-    logging.info(f"Processant {len(photos)} fotos per crear l'àlbum...")
-    make_pdf(photo_infos)
-    logging.info("Tasca finalitzada. Ja pots gaudir del teu àlbum.")
+    generator = AlbumGenerator(
+        input_folder=args.input,
+        output_file=args.output,
+        title=args.title,
+        show_date=args.show_date,
+        show_time=args.show_time
+    )
+    
+    generator.generate()
 
 if __name__ == "__main__":
     main()
