@@ -30,11 +30,11 @@ def get_photo_datetime(path: Path) -> datetime:
         # L'ús del context manager (with) assegura que el fitxer es tanqui correctament en tots els casos.
         # Image.open aplica "lazy loading", carregant només les capçaleres en lloc de tota la memòria de píxels.
         with Image.open(path) as img:
-            # S'utilitza getexif() ja que és el mètode oficial a les versions actuals de PIL.
-            exif = img.getexif() 
-            # Si getexif() falla, es recorre al mètode privat antic per mantenir la retrocompatibilitat.
-            if not exif and hasattr(img, '_getexif'):
-                exif = getattr(img, "_getexif", lambda: None)()
+            # S'utilitza _getexif() perquè retorna un diccionari pla amb totes les etiquetes (incloses les del subdirectori Exif),
+            # on normalment es troben "DateTimeOriginal" i "DateTimeDigitized". El mètode getexif() sovint les omet a Pillow.
+            exif = None
+            if hasattr(img, '_getexif'):
+                exif = img._getexif()
                 
             if exif:
                 # S'iteren les etiquetes per buscar la data, utilitzant ExifTags.TAGS per traduir els IDs numèrics.
