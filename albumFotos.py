@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 from datetime import datetime
 from PIL import Image, ExifTags, ImageOps
@@ -51,9 +52,22 @@ def get_photo_datetime(path: Path) -> datetime:
         # Si hi ha un error no s'atura l'execució si l'imatge està corrompuda, però es deixa rastre al debug per investigar-ho.
         logging.debug(f"Avís: No s'han pogut llegir les metadades EXIF de {path.name} ({e})")
 
-    # Alternativa (Pla B): s'utilitza st_mtime (Data de modificació) del sistema de fitxers. 
-    # Es descarta ctime, ja que en sistemes Linux/Mac representa l'últim canvi de metadades i no la creació.
-    return datetime.fromtimestamp(path.stat().st_mtime)
+    # Intent d'extracció de la data a partir del nom del fitxer per a imatges sense EXIF (ex. WhatsApp "IMG-20231015-WA0001.jpg").
+    # S'utilitza una expressió regular per identificar el patró de data integrat.
+    match = re.search(r"(?:IMG|VID)-(\d{4})(\d{2})(\d{2})-WA", path.name, re.IGNORECASE)
+    if match:
+        try:
+            year, month, day = map(int, match.groups())
+            # En absència d'hora al nom del fitxer, s'assigna per defecte les 00:00:00.
+            return datetime(year, month, day)
+        except ValueError:
+            pass
+
+    # Alternativa (Pla C): s'utilitza la data més antiga entre st_mtime i st_ctime del sistema de fitxers.
+    # En casos on el nom és un hash (ex: e09f33830-...) i no hi ha EXIF, aquesta és l'única informació que queda.
+    # A Windows, st_ctime és la creació i st_mtime la modificació. N'agafem la més antiga.
+    stat = path.stat()
+    return datetime.fromtimestamp(min(stat.st_mtime, stat.st_ctime))
 
 def make_pdf(photo_infos: list[tuple[Path, datetime]]):
     """
