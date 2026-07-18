@@ -87,12 +87,6 @@ class AlbumGenerator:
         c.setFillColor(self.bg_color)
         c.rect(0, 0, w, h, stroke=0, fill=1)
 
-    def draw_footer(self, c, page_num, w):
-        """Afegeix la numeració de pàgina al peu."""
-        c.setFont("Helvetica", 10)
-        c.setFillColor(HexColor("#888888"))
-        c.drawCentredString(w / 2, 15, f"Pàgina {page_num}")
-
     def generate(self):
         if not self.input_folder.is_dir():
             logging.error(f"No s'ha trobat el directori d'origen: {self.input_folder}")
@@ -168,13 +162,11 @@ class AlbumGenerator:
         polaroid_padding = 8
         shadow_offset = 3
 
-        page_num = 1
         usable_w = page_w - 2 * self.margin
         usable_h = page_h - 2 * self.margin
         
         for layout, page_photos in pages:
             self.draw_background(c, page_w, page_h)
-            self.draw_footer(c, page_num, page_w)
             
             rows = len(layout)
             # L'alçada de cada fila és uniforme per tota la pàgina
@@ -251,7 +243,6 @@ class AlbumGenerator:
                     photo_index += 1
                     
             c.showPage()
-            page_num += 1
                 
         c.save()
         logging.info(f"Tasca finalitzada. PDF generat correctament amb graelles dinàmiques: {self.output_file.absolute()}")
