@@ -61,12 +61,12 @@ class AlbumGenerator:
         return res
         
     def get_photo_datetime(self, path: Path) -> datetime:
-        """Extreu la data de les metadades EXIF o bé de la modificació del fitxer."""
+        """Extreu la data de les metadades EXIF o bé de la creació del fitxer."""
         try:
             with Image.open(path) as img:
-                exif = img.getexif() 
-                if not exif and hasattr(img, '_getexif'):
-                    exif = getattr(img, "_getexif", lambda: None)()
+                # A albumInicial s'usa _getexif() que retorna totes les etiquetes de forma plana,
+                # incloent 'DateTimeOriginal'. img.getexif() no les inclou al primer nivell.
+                exif = getattr(img, "_getexif", lambda: None)()
                     
                 if exif:
                     for tag, value in exif.items():
@@ -79,8 +79,8 @@ class AlbumGenerator:
         except Exception as e:
             logging.debug(f"Avís: No s'han pogut llegir les metadades EXIF de {path.name} ({e})")
 
-        # Pla B: st_mtime
-        return datetime.fromtimestamp(path.stat().st_mtime)
+        # Pla B: st_ctime (data de creació a Windows, com fa albumInicial amb getctime)
+        return datetime.fromtimestamp(path.stat().st_ctime)
 
     def draw_background(self, c, w, h):
         """Dibuixa el color de fons sòlid per a tota la pàgina."""
