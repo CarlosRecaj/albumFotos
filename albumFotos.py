@@ -1,6 +1,7 @@
 import argparse
 import random
 import logging
+import re
 from pathlib import Path
 from datetime import datetime
 from PIL import Image, ExifTags, ImageOps
@@ -61,7 +62,17 @@ class AlbumGenerator:
         return res
         
     def get_photo_datetime(self, path: Path) -> datetime:
-        """Extreu la data de les metadades EXIF o bé de la creació del fitxer."""
+        """Extreu la data del nom del fitxer, de les metadades EXIF o bé de la creació del fitxer."""
+        # 1. Comprovar si el nom té el format especial: 2006-11-12_12-20-32...
+        match = re.search(r'^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})', path.name)
+        if match:
+            try:
+                y, m, d, H, M, S = map(int, match.groups())
+                return datetime(y, m, d, H, M, S)
+            except ValueError:
+                pass
+
+        # 2. Metadades EXIF
         try:
             with Image.open(path) as img:
                 # A albumInicial s'usa _getexif() que retorna totes les etiquetes de forma plana,
