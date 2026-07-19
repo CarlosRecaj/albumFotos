@@ -24,8 +24,8 @@ class AlbumGenerator:
         
         # Paràmetres estètics
         self.page_size = A4
-        self.margin = 25
-        self.spacing = 15
+        self.margin = 10
+        self.spacing = 5
         self.bg_color = HexColor("#F5F5F0")  # Fons crema/gris suau elegant
 
     def _parse_layouts(self, layouts_str):
@@ -159,8 +159,8 @@ class AlbumGenerator:
         if self.show_date or self.show_time:
             text_height = 20
             
-        polaroid_padding = 8
-        shadow_offset = 3
+        polaroid_padding = 4
+        shadow_offset = 2
 
         usable_w = page_w - 2 * self.margin
         usable_h = page_h - 2 * self.margin
