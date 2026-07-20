@@ -40,7 +40,7 @@ class AlbumGenerator:
             # (1,) -> 1 foto molt gran
             # (1, 2, 1) -> 1 a dalt, 2 al mig, 1 a baix
             # (2, 3) -> 2 a dalt, 3 a baix (asimètric)
-            return [(1,), (2,), (2, 2), (2, 3), (3, 2), (2, 2, 2), (1,2), (2,1)]
+            return [(1,), (2,), (2, 2), (2, 2, 2), (1,2), (2,1)]
         
         res = []
         for l in layouts_str.split(","):
