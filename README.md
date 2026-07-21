@@ -1,71 +1,74 @@
-# Generador d'Àlbums de Fotos PDF
+# PDF Photo Album Generator
 
-Aquest projecte és un script en Python dissenyat per automatitzar la creació d'àlbums de fotos en format PDF a partir d'un directori d'imatges. Genera graelles fotogràfiques asimètriques, elegants i dinàmiques, i s'encarrega d'ordenar automàticament les imatges cronològicament extraient-ne les metadades EXIF (o la data de creació com a alternativa).
+This project is a Python script designed to automate the creation of photo albums in PDF format from an image directory (supports `.jpg`, `.jpeg` and `.png` formats). It generates asymmetrical, elegant and dynamic photo grids, and automatically sorts the images chronologically, prioritizing the date from the filename, EXIF metadata, or creation date as a fallback.
 
-## Funcionalitats Principals
+## Main Features
 
-- **Ordenació Cronològica:** Llegeix la data exacta des de l'etiqueta `DateTimeOriginal` amagada dins les metadades EXIF de la fotografia original. Si la imatge no té aquestes dades (per exemple, les descarregades de WhatsApp), empra la data de creació del fitxer per establir l'ordre correcte.
-- **Graelles Dinàmiques i Asimètriques:** Pots deixar que l'script triï aleatòriament els dissenys de les pàgines d'un llistat predefinit d'opcions estètiques molt visuals, o pots especificar lliurement quins estils de graella concrets vols utilitzar.
-- **Portada Automàtica:** Genera una primera pàgina que actua de portada amb un títol personalitzat i inclou automàticament l'interval de dates de les fotografies introduïdes (ex: *"De 12/03/2023 a 15/04/2023"*).
-- **Informació Temporal (Opcional):** Pots triar si vols que sota cada foto (estil *Polaroid*) hi aparegui impresa la data, l'hora, totes dues coses a la vegada o bé deixar-ho en blanc.
-- **Disseny Cuidat i Elegant:** Utilitza format A4 amb marges intel·ligents, un fons color crema/gris suau, i quadres fotogràfics amb ombres per simular l'aspecte d'imatges impreses reals, corregint automàticament l'orientació visual d'aquelles fetes en vertical segons els sensors de la càmera.
+- **Chronological Sorting:** The script determines the date and time of each photograph following this priority order to sort them correctly:
+  1. **Filename**: Checks if it has a specific date format (e.g., `2006-11-12_12-20-32`).
+  2. **EXIF Metadata**: Reads tags like `DateTimeOriginal`, `DateTimeDigitized` or `DateTime` hidden in the original photograph.
+  3. **Creation Date**: If the file lacks this data (e.g., images received via WhatsApp without EXIF), it uses the file's creation date on the system.
+- **Dynamic and Asymmetrical Grids:** You can let the script randomly choose the page designs from a predefined list of highly visual aesthetic options, or you can freely specify which specific grid styles you want to use.
+- **Automatic Cover:** Generates a first page that acts as a cover with a custom title and automatically includes the date range of the inputted photographs (e.g., *"From 12/03/2023 to 15/04/2023"*).
+- **Time Information (Optional):** You can choose whether you want the date, the time, both at the same time, or to leave it blank under each photo (*Polaroid* style).
+- **Careful and Elegant Design:** Uses A4 format with smart margins, a soft cream/gray background, and photo frames with shadows to simulate the look of real printed images, automatically correcting the visual orientation of vertically taken ones according to the camera's sensors.
 
-## Requisits i Instal·lació
+## Requirements and Installation
 
-Aquest projecte requereix **Python 3** i les següents llibreries:
-- `Pillow` (per a l'extracció d'EXIF i manipulació d'imatges)
-- `reportlab` (per a la construcció del document PDF)
+This project requires **Python 3** and the following libraries:
+- `Pillow` (for EXIF extraction and image manipulation)
+- `reportlab` (for PDF document construction)
 
-Pots instal·lar-les fàcilment si tens l'arxiu `requirements.txt`:
+You can easily install them if you have the `requirements.txt` file:
 ```bash
 pip install -r requirements.txt
 ```
-*(De forma alternativa: `pip install Pillow reportlab`)*
+*(Alternatively: `pip install Pillow reportlab`)*
 
-## Com utilitzar-lo
+## How to Use It
 
-Per fer-lo funcionar fàcilment i amb les opcions per defecte (buscant les imatges a la carpeta `Fotos` i sense imprimir la data a les cel·les), simplement executa:
+To run it easily with the default options (looking for images in the `Fotos` folder and without printing the date on the cells), simply execute:
 
 ```bash
 python albumFotos.py
 ```
-Això crearà un arxiu anomenat `album_def.pdf` dins del teu directori.
+This will create a file named `album_def.pdf` inside your directory.
 
-### Paràmetres (Arguments de Línia de Comandes)
+### Parameters (Command Line Arguments)
 
-Pots personalitzar gairebé tots els aspectes del document des de la pròpia crida des del terminal usant arguments ("flags"):
+You can customize almost all aspects of the document directly from the terminal call using arguments (flags):
 
-- `-i` o `--input`: Especifica el nom o la ruta de la carpeta origen que conté les fotos a processar. (Per defecte: `Fotos`)
-- `-o` o `--output`: Indica quin nom vols per a l'arxiu PDF que es crearà. (Per defecte: `album_def.pdf`)
-- `-t` o `--title`: Defineix el títol que encapçalarà la portada de l'àlbum. (Per defecte: `"El meu Àlbum de Fotos"`)
-- `--show-date`: Activa la inclusió de la data de la fotografia a la part de sota de la cel·la (ex: `14/05/2023`).
-- `--show-time`: Activa la inclusió de l'hora exacta sota de la cel·la (ex: `15:30`).
-- `--layouts`: Permet forçar l'ús exclusiu de certs estils de graella que prefereixis, passant-los en forma de cadena separada per comes.
+- `-i` or `--input`: Specifies the name or path of the source folder containing the photos to process. (Default: `Fotos`)
+- `-o` or `--output`: Indicates the desired name for the PDF file to be created. (Default: `album_def.pdf`)
+- `-t` or `--title`: Defines the title that will head the album cover. (Default: `"El meu Àlbum de Fotos"`)
+- `--show-date`: Enables the inclusion of the photograph's date at the bottom of the cell (e.g., `14/05/2023`).
+- `--show-time`: Enables the inclusion of the exact time at the bottom of the cell (e.g., `15:30`).
+- `--layouts`: Allows you to force the exclusive use of certain grid styles you prefer, passing them as a comma-separated string.
 
-### Exemples i Casos d'Ús
+### Examples and Use Cases
 
-**1. Generar l'àlbum imprimint tant la data com l'hora de cada fotografia:**
+**1. Generate the album printing both the date and time of each photograph:**
 ```bash
 python albumFotos.py --show-date --show-time
 ```
 
-**2. Crear un àlbum des d'una altra carpeta, establint el títol i el nom del document final:**
+**2. Create an album from another folder, setting the title and the final document name:**
 ```bash
-python albumFotos.py -i "Vacances_Roma" -o "Roma_2023.pdf" -t "Viatge a Roma 2023"
+python albumFotos.py -i "Vacances_Roma" -o "Roma_2023.pdf" -t "Trip to Rome 2023"
 ```
 
-**3. Exemple complert combinant vàries de les opcions i forçant dissenys específics de pàgina:**
+**3. Complete example combining several options and forcing specific page designs:**
 ```bash
-python albumFotos.py -i "Imatges" -o "LaMevaFesta.pdf" -t "Festa d'Aniversari" --show-date --layouts "2x2,3,2-3"
+python albumFotos.py -i "Images" -o "MyParty.pdf" -t "Birthday Party" --show-date --layouts "2x2,3,2-3"
 ```
 
-### Com funciona el paràmetre de `--layouts`?
+### How does the `--layouts` parameter work?
 
-Els layouts descriuen l'estructura de la graella de fotos d'una pàgina. Si decideixes establir quins usar amb `--layouts`, cal que utilitzis aquesta nomenclatura (recorrent a les comes per separar múltiples dissenys, els quals s'aniran alternant a l'atzar):
+The layouts describe the structure of a page's photo grid. If you decide to set which ones to use with `--layouts`, you must use this nomenclature (using commas to separate multiple designs, which will alternate randomly):
 
-- **XxF**: Crea múltiples files idèntiques amb els mateixos elements. Ex: `2x2` indica 2 files i 2 columnes per fila (4 fotos en total).
-- **A-B-C**: Dissenys de files asimètriques indicant la quantitat a cada esglaó. Ex: `2-3` significa que a la 1a fila hi hauran 2 fotos i a la 2a n'hi hauran 3. Si fos `1-2-1` hi hauria una dalt, dos al centre i una abaix.
-- **N**: Una sola fila on hi caben `N` fotos. Ex: `3` (1 fila horitzontal on n'hi caben 3).
+- **XxF**: Creates multiple identical rows with the same elements. E.g., `2x2` indicates 2 rows and 2 columns per row (4 photos in total).
+- **A-B-C**: Asymmetrical row designs indicating the quantity at each step. E.g., `2-3` means there will be 2 photos in the 1st row and 3 in the 2nd. If it were `1-2-1` there would be one on top, two in the middle, and one at the bottom.
+- **N**: A single row fitting `N` photos. E.g., `3` (1 horizontal row fitting 3).
 
-Exemple vàlid d'arguments: `--layouts "2x2,2-3,1-2-1,3"`
-*(Nota: Si queden fotos al final que no arribin a satisfer la capacitat d'una graella completa, el programa disposa d'estructures de suport autogenerades per col·locar-les elegantment al final del document)*
+Valid arguments example: `--layouts "2x2,2-3,1-2-1,3"`
+*(Note: If there are photos left at the end that do not meet the capacity of a complete grid, the program has auto-generated fallback structures to place them elegantly at the end of the document)*
